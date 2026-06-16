@@ -296,3 +296,83 @@ LIMIT 15;
 > - **Double down on the top 3** (health_beauty, watches_gifts, bed_bath_table) — these categories have proven demand and should be prioritized for seller recruitment, promotional campaigns, and inventory depth
 > - **Investigate the gap between top 5 and the rest** — understanding whether lower-ranked categories have fewer sellers, lower prices, or less demand could reveal growth opportunities
 > - **Monitor lifestyle categories seasonally** — toys, baby, and perfumery likely spike during holidays and gifting seasons, which could inform targeted promotions around those periods
+
+## Task 6 — Review Score Distribution
+
+### Objective
+Find the count and percentage of orders for each review score (1–5) to assess overall customer satisfaction across the platform.
+
+### Query
+```sql
+SELECT 
+    t.review_score,
+    COUNT(*) AS review_count,
+    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) AS review_percentage
+FROM order_reviews t 
+GROUP BY 1
+ORDER BY 1 DESC;
+```
+
+### Results
+| review_score | review_count | review_percentage |
+|---|---|---|
+| 5 | 57,328 | 57.78% |
+| 4 | 19,142 | 19.29% |
+| 3 | 8,179 | 8.24% |
+| 2 | 3,151 | 3.18% |
+| 1 | 11,424 | 11.51% |
+
+### Key Findings
+- **Majority positive:** 5-star ratings account for 57.78% of all reviews, and combined with 4-star ratings, **77% of all orders receive a positive rating** — a strong overall satisfaction signal
+- **1-star ratings are the third most common score:** At 11.51%, 1-star reviews are more frequent than 2-star (3.18%) and 3-star (8.24%) combined — this is a classic bimodal distribution where customers tend to either love or hate their experience, with little middle ground
+- **The 1-star problem is not negligible:** Over 11,000 orders received the worst possible rating. At Olist's scale this represents a meaningful volume of unhappy customers and potential churn
+- **Scores 2 and 3 are relatively rare:** Only 11.42% of reviews fall in the middle range, suggesting customers rarely feel neutral — they either had a good experience or a bad one
+
+### Action Items
+> - **Investigate 1-star drivers:** Cross-reference 1-star reviews with delivery delay data to test whether late deliveries are the primary cause — this ties directly into our delivery performance findings from Tasks 2 and 3
+> - **Prioritize the bimodal pattern in Power BI:** The contrast between 5-star and 1-star volumes will make for a compelling visual in the dashboard
+> - **Segment by state:** Given the large delivery time gaps identified in Task 3, states with the longest delivery times (RR, AP, AM) may also show higher rates of 1-star reviews — worth testing in a future query
+
+### Hypothesis to Test Next
+> Do orders with longer delivery times — particularly those that arrived late relative to the estimated date — correlate with lower review scores? We flagged this in Tasks 2 and 3 and now have the review data to test it.
+
+## Task 7 — Delivery Delay vs Review Score
+
+### Objective
+Test the hypothesis that late deliveries drive lower review scores by comparing average delivery delay against review score. A negative delay means the order arrived early; a positive delay means it arrived late.
+
+### Query
+```sql
+SELECT 
+    t.review_score,
+    AVG(o.order_delivered_customer_date - o.order_estimated_delivery_date) AS avg_delay
+FROM orders o 
+JOIN order_reviews t 
+    USING (order_id)
+WHERE o.order_status = 'delivered'
+GROUP BY 1
+ORDER BY 1 DESC;
+```
+
+### Results
+| review_score | avg_delay |
+|---|---|
+| 5 | -12 days 16:30:26 |
+| 4 | -11 days 16:25:04 |
+| 3 | -9 days 25:57:11 |
+| 2 | -7 days 22:30:45 |
+| 1 | -3 days 08:35:38 |
+
+### Key Findings
+- **Hypothesis partially supported — but with a twist:** Every review score group received their order early on average, meaning late delivery is not the sole driver of 1-star reviews. However, the pattern is still very clear and meaningful
+- **Strong correlation between earliness and satisfaction:** 5-star orders arrived ~12.7 days early on average, while 1-star orders arrived only ~3.4 days early — a 9+ day difference. The earlier the delivery, the higher the review score
+- **1-star orders still arrived early:** Even dissatisfied customers received their orders ~3.4 days ahead of the estimate on average, which strongly suggests that **factors beyond delivery timing** — such as product quality, damaged goods, wrong items, or seller communication — are primary drivers of poor reviews
+- **The underpromise/overdeliver strategy from Task 2 is confirmed here:** Customers who experienced the largest gap between expectation and reality (earliest deliveries) gave the best ratings, validating Olist's conservative estimation approach
+
+### Action Items
+> - **Investigate 1-star review comments:** The text in `review_comment_message` may reveal what customers are actually complaining about — product quality, wrong items, damaged packaging, or poor seller communication are likely culprits
+> - **Don't over-index on delivery speed as the fix:** This data suggests that improving delivery times alone will not resolve the 1-star problem — product and seller quality need to be examined
+> - **Flag for Power BI:** A visual showing the clear staircase pattern between delivery earliness and review score will be a compelling dashboard element
+
+### Hypothesis Outcome
+> **Partially confirmed.** Delivery timing does correlate with review scores — earlier deliveries earn higher ratings — but late delivery alone does not explain 1-star reviews, since even 1-star orders arrived early on average. The root cause of poor reviews likely lies elsewhere, such as product quality or seller behavior.
