@@ -376,3 +376,92 @@ ORDER BY 1 DESC;
 
 ### Hypothesis Outcome
 > **Partially confirmed.** Delivery timing does correlate with review scores — earlier deliveries earn higher ratings — but late delivery alone does not explain 1-star reviews, since even 1-star orders arrived early on average. The root cause of poor reviews likely lies elsewhere, such as product quality or seller behavior.
+
+## Task 8 — Payment Method Breakdown
+
+### Objective
+Find the breakdown of payment methods by order count, total revenue, and average installments to understand how customers prefer to pay on the Olist platform.
+
+### Query
+```sql
+SELECT 
+    payment_type, 
+    COUNT(order_id) AS order_count, 
+    SUM(payment_value) AS total_revenue, 
+    ROUND(AVG(payment_installments), 1) AS avg_installments
+FROM order_payments op
+GROUP BY 1
+ORDER BY 3 DESC;
+```
+
+### Results
+| payment_type | order_count | total_revenue | avg_installments |
+|---|---|---|---|
+| credit_card | 76,795 | 12,542,084.19 | 3.5 |
+| boleto | 19,784 | 2,869,361.27 | 1.0 |
+| voucher | 5,775 | 379,436.87 | 1.0 |
+| debit_card | 1,529 | 217,989.79 | 1.0 |
+| not_defined | 3 | 0.00 | 1.0 |
+
+### Key Findings
+- **Credit card dominates overwhelmingly:** 76,795 orders paid by credit card, generating 12.54M BRL — that's **77% of all orders and roughly 79% of total revenue**, making it by far the most important payment method on the platform
+- **Installments are a credit card phenomenon:** The average of 3.5 installments for credit card vs 1.0 for every other method confirms that installment payments are uniquely tied to credit card usage — a well known cultural norm in Brazil where consumers routinely split purchases into monthly payments
+- **Boleto is a distant but meaningful second:** With 19,784 orders and 2.87M BRL in revenue, boleto (a Brazilian bank slip payment method) is the only other significant payment channel, reflecting its widespread use among Brazilians without credit cards or who prefer not to use them online
+- **Debit card and voucher are minor channels:** Together they account for less than 4% of orders and revenue, suggesting limited adoption or availability
+- **3 orders with `not_defined` and zero revenue:** Likely test orders or data entry errors — negligible but worth noting as a data quality flag
+
+### Action Items
+> - **Protect the credit card experience:** Since 79% of revenue flows through credit card, any friction in the checkout or payment processing for credit cards would have an outsized impact on the business
+> - **Investigate installment behavior further:** Do higher installment counts correlate with higher order values or specific product categories? Customers buying big ticket items (computers, furniture) may be splitting into more installments — worth exploring
+> - **Monitor boleto conversion:** Boleto orders can be abandoned if the customer never pays the slip. It would be worth investigating whether boleto orders have a higher cancellation rate than credit card orders
+
+### Cultural Context
+> Installment payments ("parcelamento") are deeply embedded in Brazilian consumer culture. It is common for Brazilians to split even small purchases into multiple monthly payments, which explains why the average credit card order uses 3.5 installments. This is a uniquely Brazilian dynamic that would not appear in equivalent datasets from the US or Europe, and makes this dataset particularly interesting for demonstrating cultural data literacy.
+
+## Task 9 — Customer Retention & Repeat Purchase Rate
+
+### Objective
+Determine how many customers placed more than one order to assess Olist's customer retention and loyalty, using a CTE to first calculate order counts per unique customer before summarizing at the platform level.
+
+### Query
+```sql
+WITH customer_purchase_counts AS (
+    SELECT
+        c.customer_unique_id,
+        COUNT(o.order_id) AS "# of orders"
+    FROM orders o
+    JOIN customers c
+        USING (customer_id)
+    GROUP BY c.customer_unique_id
+)
+SELECT
+    COUNT(DISTINCT customer_unique_id) AS unique_customers,
+    COUNT(CASE WHEN "# of orders" > 1 THEN 1 END) AS repeat_customers,
+    ROUND(
+        COUNT(CASE WHEN "# of orders" > 1 THEN 1 END) * 100.0 / COUNT(DISTINCT customer_unique_id),
+        2
+    ) AS repeat_purchase_rate
+FROM customer_purchase_counts;
+```
+
+### Results
+| unique_customers | repeat_customers | repeat_purchase_rate |
+|---|---|---|
+| 96,096 | 2,997 | 3.12% |
+
+### Key Findings
+- **Critically low retention rate:** Only 3.12% of customers placed more than one order — meaning **96.88% of Olist's customer base shops once and never returns**
+- **Well below industry benchmarks:** Healthy e-commerce platforms typically see repeat purchase rates of 20–30%. At 3.12%, Olist is significantly underperforming on customer loyalty
+- **Marketplace invisibility problem:** Many customers may not realize they are shopping on Olist at all — they find an individual seller through Google or social media and complete the purchase without building any brand association with Olist itself, making retention inherently more difficult in a marketplace model
+- **Revenue implications are significant:** Acquiring a new customer costs significantly more than retaining an existing one. Moving the repeat purchase rate from 3.12% to even 10% would represent a substantial revenue uplift without increasing new customer acquisition spend
+
+### Action Items
+> - **Launch a customer loyalty program:** Member discounts, points systems, or exclusive offers for returning customers are proven retention levers that could meaningfully move the repeat purchase rate
+> - **Email remarketing campaigns:** Re-engaging past customers with personalized recommendations based on their purchase history is a low cost, high impact retention strategy
+> - **Improve Olist brand visibility:** Ensuring customers know they are shopping on Olist — not just an anonymous seller — is a prerequisite for building platform-level loyalty
+> - **Segment repeat customers:** Understanding who the 2,997 repeat customers are, what they bought, and which states they're from could reveal the profile of Olist's most loyal customers and inform targeted retention campaigns
+
+### SQL Techniques Used
+- **CTE (Common Table Expression):** Used to pre-aggregate order counts per unique customer before summarizing in the outer query
+- **Conditional aggregation:** `COUNT(CASE WHEN ... THEN 1 END)` used to count repeat customers inline without a subquery
+- **`customer_unique_id` vs `customer_id`:** The `customers` table uses `customer_id` as a per-order identifier — `customer_unique_id` is required to correctly identify the same physical customer across multiple orders
