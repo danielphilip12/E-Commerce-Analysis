@@ -465,3 +465,69 @@ FROM customer_purchase_counts;
 - **CTE (Common Table Expression):** Used to pre-aggregate order counts per unique customer before summarizing in the outer query
 - **Conditional aggregation:** `COUNT(CASE WHEN ... THEN 1 END)` used to count repeat customers inline without a subquery
 - **`customer_unique_id` vs `customer_id`:** The `customers` table uses `customer_id` as a per-order identifier — `customer_unique_id` is required to correctly identify the same physical customer across multiple orders
+
+
+## Task 10 — Seller Performance Tiering
+
+### Objective
+Segment all sellers into 4 performance tiers based on total revenue using `NTILE(4)`, while also surfacing order count and average review score for each seller, to help the marketplace team decide who to feature, support, or potentially offboard.
+
+### Query
+```sql
+WITH cte AS (
+    SELECT
+        s.seller_id,
+        SUM(oi.price + oi.freight_value) AS total_revenue,
+        COUNT(order_id) AS order_count,
+        ROUND(AVG(t.review_score), 2) AS avg_review
+    FROM sellers s
+    JOIN order_items oi
+        USING (seller_id)
+    LEFT JOIN order_reviews t
+        USING (order_id)
+    GROUP BY s.seller_id
+)
+SELECT
+    seller_id,
+    total_revenue,
+    order_count,
+    avg_review,
+    NTILE(4) OVER (ORDER BY total_revenue DESC) AS tier
+FROM cte
+ORDER BY total_revenue DESC;
+```
+
+### Results (sample — tier 1 top performers)
+| seller_id | total_revenue | order_count | avg_review | tier |
+|---|---|---|---|---|
+| 4869f7a5dfa277a7dca6462dcf3b52b2 | 249,640.70 | 1,156 | 4.12 | 1 |
+| 7c67e1448b00f6e969d365cea6b010ab | 241,374.82 | 1,375 | 3.35 | 1 |
+| 4a3ca9315b744ce9f8e9374361493884 | 238,440.31 | 2,009 | 3.80 | 1 |
+| 53243585a1d6dc2643021fd1853d8905 | 235,856.68 | 410 | 4.08 | 1 |
+| fa1c13f2614d7b5c4749cbc52fecda94 | 204,084.73 | 586 | 4.34 | 1 |
+
+### Results (sample — tier 1/tier 2 boundary)
+| seller_id | total_revenue | order_count | avg_review | tier |
+|---|---|---|---|---|
+| 7f2617c58d5d06806987308b45654351 | 3,983.27 | 23 | 3.87 | **1** |
+| dd533b429f380718b70ad9922c294bae | 3,970.98 | 45 | 3.73 | **2** |
+| b1ac6ea7895bc3dd6f0f6f4abbdd2821 | 3,964.33 | 41 | 4.27 | 2 |
+| 432c37c9dfba871172ec162e20118b8c | 3,938.54 | 57 | 4.18 | 2 |
+
+### Key Findings
+- **Tier boundary confirmed working correctly:** The cutoff between tier 1 and tier 2 falls precisely at the revenue break ($3,983.27 → $3,970.98), confirming the `NTILE(4)` window function is correctly ranking and splitting all 3,095 sellers into 4 equal-sized groups of roughly 774 sellers each
+- **Tier 1 spans an enormous revenue range:** From $249,640 down to $3,983 — nearly a 63x difference within the same tier. This is an important limitation of `NTILE`: it splits sellers into equal-*sized* groups, not equal-*revenue* bands, so "tier 1" includes both superstar sellers and fairly modest performers
+- **High revenue does not guarantee high satisfaction:** Within tier 1 alone, average review scores range from as low as **1.40** up to **4.81**. Several high-revenue sellers have alarmingly poor review scores:
+  - `b1b3948701c5c72445495bd161b83a4c` — $25,185 in revenue, only **1.72** average review
+  - `b37c4c02bda3161a7546a4e6d222d5b2` — $24,487 in revenue, only **1.40** average review
+- **Order count and revenue don't perfectly correlate:** Some sellers generate high revenue from relatively few high-priced orders, while others accumulate high order counts at lower revenue per order — these likely represent two distinct seller business models (premium/low-volume vs. budget/high-volume) worth segmenting separately in future analysis
+
+### Action Items
+> - **Flag low-review, high-revenue sellers for investigation:** Sellers like `b1b3948701c5c72445495bd161b83a4c` and `b37c4c02bda3161a7546a4e6d222d5b2` are generating significant revenue but delivering a poor customer experience — this is a direct risk to platform reputation and should be prioritized for seller support outreach or review
+> - **Consider a secondary tiering dimension:** A combined score factoring in both revenue and review quality (not revenue alone) would better identify sellers worth featuring or promoting
+> - **Investigate the two seller archetypes:** High-order/lower-revenue-per-order sellers vs. low-order/high-revenue-per-order sellers may need different support strategies, pricing guidance, or marketing treatment
+
+### SQL Techniques Used
+- **CTE (Common Table Expression):** Used to pre-aggregate revenue, order count, and average review score per seller before ranking in the outer query
+- **Window function — `NTILE(4) OVER (ORDER BY ...)`:** Used to split all sellers into 4 equal-sized performance tiers ranked by revenue, with `ORDER BY total_revenue DESC` ensuring tier 1 represents top performers
+- **Multi-table join with `LEFT JOIN`:** Reviews joined with `LEFT JOIN` since not every order has a review, preserving all seller order activity even when review data is missing
